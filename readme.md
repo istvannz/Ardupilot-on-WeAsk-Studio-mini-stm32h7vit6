@@ -1,7 +1,6 @@
 # Installation of Ardupilot on WeAct Studio Mini STM32H743VIT6
 
-This project looks at configuring the Ardupilot onto hte WeAct Studio Mini STM32H743VIT6
-M32H743VIT6.
+This project looks at configuring the Ardupilot onto the WeAct Studio Mini STM32H743VIT6.
 
 <img width="1440" height="1920" alt="ab2a0122-4928-4453-b431-a8e554d921f4" src="https://github.com/user-attachments/assets/4a2c7f74-c651-4bee-86f4-d2dba4b1fa38" />
 <img width="1440" height="1920" alt="91e1c19b-4896-4ac7-87d8-c3fc123be029" src="https://github.com/user-attachments/assets/71a49211-18c6-4bb0-b609-b492d3b6570b" />
