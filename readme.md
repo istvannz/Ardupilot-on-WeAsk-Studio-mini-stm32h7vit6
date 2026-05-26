@@ -24,7 +24,7 @@ This project looks at configuring the Ardupilot onto the WeAct Studio Mini STM32
 |--------|-----------|------|
 | ICM42688 IMU | SPI1 | SCK=PA5, MISO=PA6, MOSI=PA7, CS=PB12, INT=PB0 |
 | BMP388 Barometer | I2C1 | SCL=PB8, SDA=PB9, addr=0x77 |
-| BMM150 Compass | I2C1 | SCL=PB8, SDA=PB9, addr=0x10 |
+| BMM150 Compass | I2C1 | SCL=PB8, SDA=PB9, addr=0x13 |
 
 ### Pinout
 
