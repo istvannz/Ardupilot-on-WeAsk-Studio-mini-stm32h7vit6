@@ -1,10 +1,11 @@
-# Installation of Ardupilot on WeAct Studio Mini STM32H743VIT6
+# ArduPilot on WeAct Mini STM32H743VIT6
 
-This project looks at configuring the Ardupilot onto the WeAct Studio Mini STM32H743VIT6.
+This project documents configuring ArduPilot on the WeAct Studio Mini STM32H743VIT6 development board as a custom quadcopter flight controller, including all patches required to get USB enumeration and the bootloader running correctly.
 
 <img width="1440" height="1920" alt="ab2a0122-4928-4453-b431-a8e554d921f4" src="https://github.com/user-attachments/assets/4a2c7f74-c651-4bee-86f4-d2dba4b1fa38" />
 <img width="1440" height="1920" alt="91e1c19b-4896-4ac7-87d8-c3fc123be029" src="https://github.com/user-attachments/assets/71a49211-18c6-4bb0-b609-b492d3b6570b" />
 
+---
 
 ## Hardware
 
@@ -18,26 +19,71 @@ This project looks at configuring the Ardupilot onto the WeAct Studio Mini STM32
 | Onboard flash | 8MB W25Q64 (QSPI) |
 | SD card | SDMMC1 |
 
-### Sensor Configuration
+---
 
-| Sensor | Interface | Pins |
-|--------|-----------|------|
-| ICM42688 IMU | SPI1 | SCK=PA5, MISO=PA6, MOSI=PA7, CS=PB12, INT=PB0 |
-| BMP388 Barometer | I2C1 | SCL=PB8, SDA=PB9, addr=0x77 |
-| BMM150 Compass | I2C1 | SCL=PB8, SDA=PB9, addr=0x13 |
+## Sensor Configuration
 
-### Pinout
+| Sensor | Interface | Pins | Notes |
+|--------|-----------|------|-------|
+| ICM42688 IMU | SPI1 | SCK=PA5, MISO=PA6, MOSI=PA7, CS=PB12, INT=PB0 | 4.7kΩ pullup on CS |
+| BMP388 Barometer | I2C1 | SCL=PB8, SDA=PB9 | addr=0x77 (SDO to VCC) |
+| BMM150 Compass | I2C1 | SCL=PB8, SDA=PB9 | addr=0x10–0x13 (see note) |
+
+> **BMM150 I2C address** depends on the SDO/ADDR pin: GND=0x10, VCC=0x11, SDIO=0x12, SCK=0x13. Check your breakout board and update `hwdef.dat` accordingly.
+
+> **I2C pullups** — both BMP388 and BMM150 share I2C1. Ensure 4.7kΩ pullups are present on SCL and SDA. Most breakout boards include these.
+
+---
+
+## Pinout
+
+### Serial Ports
+
+| Port | Function | TX Pin | RX Pin | Baud | Protocol |
+|------|----------|--------|--------|------|----------|
+| Serial0 | USB / GCS | PA11 | PA12 | — | MAVLink2 |
+| Serial1 | GPS | PA9 | PA10 | 38400 | GPS auto |
+| Serial2 | RC Receiver (iBUS) | PA2 | PA3 | 115200 | iBUS (RX only) |
+| Serial3 | Jetson Orin Nano | PB10 | PB11 | 115200 | MAVLink2 |
+
+### Motor Outputs
+
+| Motor | Pin | Timer | Position |
+|-------|-----|-------|----------|
+| M1 | PE9 | TIM1_CH1 | Front-Right |
+| M2 | PE11 | TIM1_CH2 | Rear-Left |
+| M3 | PE13 | TIM1_CH3 | Front-Left |
+| M4 | PE14 | TIM1_CH4 | Rear-Right |
+
+### Other Connections
 
 | Function | Pin | Notes |
 |----------|-----|-------|
-| GPS | USART1 | TX=PA9, RX=PA10 |
-| RC Receiver | USART2 | TX=PA2, RX=PA3 (CRSF/ELRS/SBUS) |
-| Motor 1 (FR) | PE9 | TIM1_CH1 |
-| Motor 2 (RL) | PE11 | TIM1_CH2 |
-| Motor 3 (FL) | PE13 | TIM1_CH3 |
-| Motor 4 (RR) | PE14 | TIM1_CH4 |
-| SWDIO | PA13 | Debug |
-| SWCLK | PA14 | Debug |
+| Arming button | PE4 | Pull to GND, internal pullup enabled |
+| Buzzer | PD14 | TIM4_CH3, active buzzer, + to pin, − to GND |
+| SWDIO | PA13 | SWD debug |
+| SWCLK | PA14 | SWD debug |
+
+---
+
+## Wiring Notes
+
+### iBUS RC Receiver
+iBUS is single-wire — only the RX pin (PA3) is used. TX (PA2) can be left unconnected. Connect the iBUS signal wire to PA3, VCC to 3.3V or 5V (depending on receiver), and GND to GND.
+
+### Jetson Orin Nano Companion Computer
+Connect via the 40-pin header UART (pins 8/10 = `/dev/ttyTHS0`):
+
+```
+Jetson pin 8  (TX) → FC PB11 (UART3 RX)
+Jetson pin 10 (RX) → FC PB10 (UART3 TX)
+Jetson pin 6  (GND) → FC GND
+```
+
+> **Important:** Share GND only. Do NOT connect 3.3V or 5V between the Jetson and flight controller — each has its own power supply.
+
+### Motors / ESCs
+ESCs run from a separate LiPo battery. Only the PWM signal wires (PE9/11/13/14) and a shared GND connect to the flight controller.
 
 ---
 
@@ -69,9 +115,9 @@ Tools/environment_install/install-prereqs-ubuntu.sh -y
 
 ### 2. Apply Required Patches
 
-These patches are mandatory — without them the bootloader will not run and USB will not enumerate.
+These patches are mandatory — without them the bootloader will crash and USB will not enumerate.
 
-#### 2a. Fix GCC 13.2 strlen miscompilation (critical — causes bootloader crash)
+#### 2a. Fix GCC 13.2 strlen miscompilation (critical — causes bootloader hard fault)
 
 ```bash
 sed -i 's/^size_t strlen(const char \*s1)$/__attribute__((optimize("O0"))) size_t strlen(const char *s1)/' \
@@ -110,7 +156,15 @@ sed -i 's/#define TRDT_VALUE_FS           5/#define TRDT_VALUE_FS           9/' 
 
 #### 2d. Add #ifndef guards to stm32h7_mcuconf.h
 
-Several defines in `libraries/AP_HAL_ChibiOS/hwdef/common/stm32h7_mcuconf.h` lack `#ifndef` guards, causing redefinition errors. Wrap the following defines:
+Several defines in `libraries/AP_HAL_ChibiOS/hwdef/common/stm32h7_mcuconf.h` lack `#ifndef` guards, causing redefinition errors. Wrap each bare `#define` with:
+
+```c
+#ifndef FOO
+#define FOO bar
+#endif
+```
+
+Apply this to the following defines:
 
 - `STM32_VOS` (line ~109)
 - `STM32_PLL1_DIVM_VALUE`, `STM32_PLL1_DIVN_VALUE`, `STM32_PLL1_DIVP_VALUE`, `STM32_PLL1_DIVR_VALUE` (25MHz block)
@@ -118,16 +172,9 @@ Several defines in `libraries/AP_HAL_ChibiOS/hwdef/common/stm32h7_mcuconf.h` lac
 - `STM32_USBSEL`
 - `STM32_ADC_ADC12_DMA_STREAM`
 
-For each, replace `#define FOO bar` with:
-```c
-#ifndef FOO
-#define FOO bar
-#endif
-```
-
 #### 2e. Guard ADCD3 references in AnalogIn.cpp
 
-Apply the patch from `patches/AnalogIn_cpp.patch` or wrap all occurrences of `ADCD3` in `libraries/AP_HAL_ChibiOS/AnalogIn.cpp` with `#ifdef ADCD3` / `#endif` guards.
+Apply `patches/AnalogIn_cpp.patch` or wrap all occurrences of `ADCD3` in `libraries/AP_HAL_ChibiOS/AnalogIn.cpp` with `#ifdef ADCD3` / `#endif` guards.
 
 ### 3. Create Board Directory
 
@@ -167,7 +214,7 @@ Verify success — the LED on PE3 should blink after reset.
 python3 Tools/scripts/uploader.py --port /dev/ttyACM0 build/WeActH743/bin/arducopter.apj
 ```
 
-Or use QGroundControl: **Vehicle Setup → Firmware → Custom firmware** and select `arducopter.apj`.
+Or via QGroundControl: **Vehicle Setup → Firmware → Custom firmware** and select `arducopter.apj`.
 
 ---
 
@@ -179,6 +226,81 @@ Or use QGroundControl: **Vehicle Setup → Firmware → Custom firmware** and se
 Bootloader (once):  DFU → 0x08000000 → AP_Bootloader.bin
 Firmware (updates): USB → ttyACM0   → arducopter.apj
 ```
+
+---
+
+## QGroundControl Parameters
+
+After flashing, set these parameters in QGroundControl under **Vehicle Setup → Parameters**:
+
+### RC Receiver (iBUS)
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `SERIAL2_PROTOCOL` | 23 | RCInput |
+| `SERIAL2_BAUD` | 115 | 115200 baud |
+| `RC_PROTOCOLS` | 32 | iBUS |
+
+### Companion Computer (Jetson Orin Nano)
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `SERIAL3_PROTOCOL` | 2 | MAVLink2 |
+| `SERIAL3_BAUD` | 115 | 115200 baud |
+
+### Buzzer
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `NOTIFY_BUZZ_ENABLE` | 1 | Enable buzzer |
+
+### Arming Button
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `BTN_ENABLE` | 1 | Enable button |
+| `BTN_FUNC1` | 41 | Arm/disarm toggle |
+
+---
+
+## Jetson Orin Nano Setup
+
+### MAVProxy
+
+```bash
+pip3 install MAVProxy
+mavproxy.py --master=/dev/ttyTHS0 --baudrate=115200 --console
+```
+
+### MAVSDK (Python)
+
+```bash
+pip3 install mavsdk
+```
+
+```python
+import asyncio
+from mavsdk import System
+
+async def main():
+    drone = System()
+    await drone.connect(system_address="serial:///dev/ttyTHS0:115200")
+    async for state in drone.core.connection_state():
+        if state.is_connected:
+            print("Connected to flight controller")
+            break
+
+asyncio.run(main())
+```
+
+### ROS2 with MAVROS
+
+```bash
+sudo apt install ros-humble-mavros ros-humble-mavros-extras
+ros2 launch mavros apm.launch fcu_url:=/dev/ttyTHS0:115200
+```
+
+> **Note:** Use `/dev/ttyTHS0` or `/dev/ttyTHS1` depending on which UART header pins you use on the Orin Nano 40-pin connector.
 
 ---
 
@@ -219,7 +341,7 @@ __attribute__((optimize("O0"))) size_t strlen(const char *s1)
 
 1. **Missing board.c USB reset** — the OTG peripheral retains state from the STM32 ROM DFU bootloader. Apply the `boardInit()` patch in `board.c` to reset it on startup.
 
-2. **Wrong USB clock** — the STM32H743 needs exactly 48MHz on the USB clock. For a 25MHz crystal, the mcuconf 25MHz block uses PLL3Q which gives exactly 48MHz. Ensure `OSCILLATOR_HZ 25000000` is set and the mcuconf `#ifndef` guards are in place so the correct PLL values are used.
+2. **Wrong USB clock** — the STM32H743 needs exactly 48MHz on the USB clock. For a 25MHz crystal, the mcuconf 25MHz block uses PLL3Q which gives exactly 48MHz. Ensure `OSCILLATOR_HZ 25000000` is set and the mcuconf `#ifndef` guards are in place.
 
 3. **VBUS sensing** — the WeAct board has no VBUS sense pin. Use `define BOARD_OTG_NOVBUSSENS 1` in hwdef (not `HAL_USB_FORCE_CONNECTED`).
 
@@ -237,29 +359,29 @@ __attribute__((optimize("O0"))) size_t strlen(const char *s1)
 
 ### Build error: "STM32_VOS_SCALE0 is not defined"
 
-**Cause:** This ChibiOS version does not define `STM32_VOS_SCALE0` — only SCALE1/2/3 exist. VOS0 (480MHz boost) requires a different mechanism.
+**Cause:** This ChibiOS version does not define `STM32_VOS_SCALE0` — only SCALE1/2/3 exist.
 
-**Fix:** Do not set `STM32_VOS` in hwdef. The bootloader runs at 400MHz on VOS1 which is sufficient. The PLL3Q path gives 48MHz USB regardless.
+**Fix:** Do not set `STM32_VOS` in hwdef. The bootloader runs at 400MHz on VOS1 which is sufficient. PLL3Q gives 48MHz USB regardless.
 
 ---
 
 ### Build error: "STM32_ADC_ADC12_DMA_STREAM not defined"
 
-**Cause:** Neither `STM32_ADC_ADC1_DMA_STREAM` nor `STM32_ADC_ADC2_DMA_STREAM` is defined for this board, so the conditional in `stm32h7_mcuconf.h` produces nothing.
+**Cause:** Neither `STM32_ADC_ADC1_DMA_STREAM` nor `STM32_ADC_ADC2_DMA_STREAM` is defined for this board.
 
 **Fix:** Add to `hwdef.dat`:
 ```
 define HAL_USE_ADC FALSE
 ```
-This disables ADC entirely since no analog sensors are connected. Re-enable when adding battery voltage monitoring.
+Re-enable when adding battery voltage monitoring.
 
 ---
 
 ### Build error: "SERIAL driver activated but no USART/UART peripheral assigned"
 
-**Cause:** `SERIAL_ORDER` includes `OTG1` but the ChibiOS serial driver still requires at least one physical UART to be defined.
+**Cause:** `SERIAL_ORDER` includes `OTG1` but no physical UART is defined.
 
-**Fix:** Always include at least one UART in `hwdef.dat`:
+**Fix:** Always include at least one UART:
 ```
 SERIAL_ORDER OTG1 USART1
 PA9  USART1_TX USART1
@@ -270,7 +392,7 @@ PA10 USART1_RX USART1
 
 ### Build error: mavlink version.h not found
 
-**Cause:** MAVLink headers are generated during configure but the pymavlink submodule or headers are missing.
+**Cause:** MAVLink headers not generated.
 
 **Fix:**
 ```bash
@@ -286,26 +408,64 @@ python3 -m pymavlink.tools.mavgen \
 
 ### Firmware flashed but no USB / QGroundControl connection
 
-**Cause:** Most likely the `arducopter_with_bl.hex` combined file was used, causing a conflict between the embedded bootloader and the manually flashed one.
+**Cause:** The `arducopter_with_bl.hex` combined file was used.
 
-**Fix:** Never use the combined `_with_bl.hex`. Flash bootloader via DFU once, then upload firmware via `.apj` only:
+**Fix:** Never use `_with_bl.hex`. Flash bootloader via DFU once, then upload firmware via `.apj`:
 ```bash
 python3 Tools/scripts/uploader.py --port /dev/ttyACM0 build/WeActH743/bin/arducopter.apj
 ```
 
 ---
 
+### INS: unable to initialise driver (IMU not detected)
+
+**Causes and fixes:**
+
+1. **CS pin floating** — PB12 needs a 4.7kΩ pullup to 3.3V if your breakout board lacks one.
+2. **Wrong SPI mode** — ICM42688 uses MODE3. Verify in `hwdef.dat`: `SPIDEV icm42688 SPI1 DEVID1 ICM42688_CS MODE3 2*MHZ 16*MHZ`
+3. **Wiring** — double-check PA5=SCK, PA6=MISO, PA7=MOSI, PB12=CS.
+4. **Voltage** — ICM42688 logic must be 3.3V.
+
+---
+
+### Compass not detected (BMM150)
+
+**Cause:** Wrong I2C address or missing pullups.
+
+**Fix:** Verify the SDO/ADDR pin on your BMM150 module and set the matching address in `hwdef.dat`:
+
+| SDO | Address |
+|-----|---------|
+| GND | 0x10 |
+| VCC | 0x11 |
+| SDIO | 0x12 |
+| SCK | 0x13 |
+
+Also ensure 4.7kΩ pullups are present on SCL (PB8) and SDA (PB9).
+
+---
+
 ### QGroundControl shows "Vehicle not ready"
 
-**Cause:** Normal — pre-arm checks are failing because sensors are not connected or calibrated.
+**Cause:** Normal — pre-arm checks failing because sensors are not connected or calibrated.
 
-**Fix:** Connect sensors and run calibration in QGroundControl under **Vehicle Setup**:
+**Fix:** Connect sensors and run calibration under **Vehicle Setup**:
 - Accelerometer calibration
-- Compass calibration  
+- Compass calibration
 - Radio calibration (once RC receiver connected)
 
-To bypass checks temporarily for bench testing:
-`Parameters → ARMING_CHECK → 0`
+To bypass temporarily for bench testing: `Parameters → ARMING_CHECK → 0`
+
+---
+
+### Jetson not receiving MAVLink data
+
+**Causes and fixes:**
+
+1. **TX/RX swapped** — Jetson TX must connect to FC PB11 (RX), Jetson RX to FC PB10 (TX).
+2. **No shared GND** — ensure a GND wire connects Jetson and flight controller.
+3. **Wrong serial port** — try `/dev/ttyTHS1` if `/dev/ttyTHS0` does not respond.
+4. **Parameters not set** — confirm `SERIAL3_PROTOCOL=2` and `SERIAL3_BAUD=115` in QGC.
 
 ---
 
