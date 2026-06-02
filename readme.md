@@ -89,6 +89,7 @@ ESCs run from a separate LiPo battery. Only the PWM signal wires (PE9/11/13/14) 
 
 ### Wiring Diagram
 
+<img width="1280" height="720" alt="Slide1" src="https://github.com/user-attachments/assets/a17bc4d3-dd41-421f-94e7-352bf3fa084e" />
 
 
 
